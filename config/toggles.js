@@ -150,6 +150,9 @@ const longTermToggles = {
  * things from getting out of hand and keeping tons of dead unused code around.
  */
 const shortTermToggles = {
+  // break up sample upserts into multiple worker jobs
+  batchSampleUpsertJobs: environmentVariableTrue(pe, 'BATCH_SAMPLE_UPSERT_JOBS'),
+
   // turn on logging to log invalid hmset values
   logInvalidHmsetValues: environmentVariableTrue(pe,
     'LOG_INVALID_HMSET_VALUES'),

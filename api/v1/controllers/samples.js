@@ -11,7 +11,8 @@
  */
 'use strict'; // eslint-disable-line strict
 
-const featureToggles = require('feature-toggles');
+const ft = require('feature-toggles');
+const Promise = require('bluebird');
 const apiErrors = require('../apiErrors');
 const helper = require('../helpers/nouns/samples');
 const subHelper = require('../helpers/nouns/subjects');
@@ -421,20 +422,36 @@ module.exports = {
      * with status and body
      */
     function bulkUpsert(user) {
-      if (featureToggles.isFeatureEnabled('enableWorkerProcess')) {
+      if (ft.isFeatureEnabled('enableWorkerProcess')) {
         const jobType = require('../../../jobQueue/setup').jobType;
         const jobWrapper = require('../../../jobQueue/jobWrapper');
-        const wrappedBulkUpsertData = {};
-        wrappedBulkUpsertData.upsertData = value;
-        wrappedBulkUpsertData.user = user;
-        wrappedBulkUpsertData.reqStartTime = resultObj.reqStartTime;
-        wrappedBulkUpsertData.readOnlyFields = readOnlyFields;
-        const jobPromise = jobWrapper
-          .createPromisifiedJob(jobType.bulkUpsertSamples,
-            wrappedBulkUpsertData, req);
-        return jobPromise.then((job) => {
-          // set the job id in the response object before it is returned
-          body.jobId = job.id;
+        const batchSize = 1000;
+        let batches;
+        const enableBatching = ft.isFeatureEnabled('batchSampleUpsertJobs');
+        if (enableBatching && value.length > batchSize) {
+          batches = [];
+          for (let i = 0; i < value.length; i += batchSize) {
+            const batch = value.slice(i, i + batchSize);
+            batches.push(batch);
+          }
+        } else {
+          batches = [value];
+        }
+
+        return Promise.map(batches, (upsertData) => {
+          const wrappedBulkUpsertData = {
+            upsertData,
+            user,
+            reqStartTime: resultObj.reqStartTime,
+            readOnlyFields,
+          };
+          return jobWrapper.createPromisifiedJob(
+            jobType.bulkUpsertSamples, wrappedBulkUpsertData, req
+          );
+        })
+        .then((jobs) => {
+          // set the job ids in the response object before it is returned
+          body.jobIds = jobs.map((job) => job.id);
           u.logAPI(req, resultObj, body, value.length);
           return res.status(httpStatus.OK).json(body);
         })
